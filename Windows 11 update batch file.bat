@@ -1,38 +1,65 @@
 #================================================================================
 #               WINDOWS UPDATE, REPAIR, AND CLEANUP SCRIPT
 #================================================================================
-# This script must be run as an Administrator.
+# This script will automatically request Administrator privileges if needed.
 #
 # It will:
-# 1. Start a log file on your Desktop.
-# 2. Check for and install the PSWindowsUpdate module if needed.
-# 3. Search for, download, and install all available Windows Updates.
-# 4. Update all Microsoft Store / winget apps.
-# 5. Run Disk Cleanup (requires one-time setup).
+# 1. Request Admin rights (UAC Prompt).
+# 2. Check and repair the Windows system image (DISM & SFC).
+# 3. Start a log file in C:\updatelogs\.
+# 4. Install/Import the PSWindowsUpdate module.
+# 5. Search for, download, and install all available Windows Updates.
+# 6. Update all Microsoft Store / winget apps.
+# 7. Run Disk Cleanup.
 #================================================================================
 
 #--------------------------------------------------------------------------------
-# SCRIPT SETUP AND ADMIN CHECK
+# SELF-ELEVATION BLOCK
+#--------------------------------------------------------------------------------
+# This section checks for Admin rights and re-launches the script if needed.
+
+if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    # If not running as admin, show a warning and try to re-launch.
+    $arguments = "& '" + $myinvocation.mycommand.definition + "'"
+    Write-Warning "Administrator privileges are required! Popping UAC prompt..."
+    Start-Process powershell.exe -Verb RunAs -ArgumentList $arguments
+    exit
+}
+# If we get here, we are running as an Administrator.
+Write-Host "Success! Running with Administrator privileges." -ForegroundColor Green
+
+
+#--------------------------------------------------------------------------------
+# SCRIPT SETUP AND LOGGING
 #--------------------------------------------------------------------------------
 
-# Define log path
-$logPath = "$env:USERPROFILE\Desktop\WindowsUpdateLog.txt"
+# Define log path and ensure the directory exists
+$logDirectory = "C:\updatelogs"
+if (-not (Test-Path -Path $logDirectory)) {
+    Write-Host "Creating log directory at $logDirectory..."
+    New-Item -Path $logDirectory -ItemType Directory -Force | Out-Null
+}
+$logPath = Join-Path -Path $logDirectory -ChildPath "WindowsUpdateLog.txt"
 
 # Start logging
 Start-Transcript -Path $logPath -Append
 
-# Check for Administrator privileges
-Write-Host "Checking for administrator privileges..."
-if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Warning "Administrator privileges are required!"
-    Write-Warning "Please re-run this script from an elevated PowerShell terminal."
-    # Pause the script to allow the user to read the message.
-    Read-Host "Press Enter to exit..."
-    # Stop logging and exit
-    Stop-Transcript
-    exit
-}
-Write-Host "Success! Running as Administrator." -ForegroundColor Green
+
+#--------------------------------------------------------------------------------
+# SYSTEM FILE INTEGRITY CHECK & REPAIR (DISM & SFC)
+#--------------------------------------------------------------------------------
+
+Write-Host ""
+Write-Host "--- Starting System File Integrity Check ---" -ForegroundColor Yellow
+Write-Host "Step 1: Running DISM to check component store health. This may take a while." -ForegroundColor Cyan
+DISM.exe /Online /Cleanup-Image /ScanHealth
+
+Write-Host "Step 2: Running DISM to repair component store. This will take several minutes." -ForegroundColor Cyan
+DISM.exe /Online /Cleanup-Image /RestoreHealth
+
+Write-Host "Step 3: Running System File Checker (SFC). This may take a while." -ForegroundColor Cyan
+sfc.exe /scannow
+Write-Host "--- System File Integrity Check Complete ---" -ForegroundColor Green
 
 
 #--------------------------------------------------------------------------------
@@ -61,16 +88,11 @@ Write-Host "PSWindowsUpdate module is ready." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "Searching for all available Windows updates..." -ForegroundColor Cyan
-# The 'Get-WUList' command is used here to show what is available before installing.
-# It is an alias for 'Get-WindowsUpdate -ListOnly'.
 Get-WUList -MicrosoftUpdate
 
 Write-Host ""
 Write-Host "Starting installation of all approved updates. The system may reboot." -ForegroundColor Yellow
-# Installs all available updates, accepts all prompts, and auto reboots if needed.
 Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -AutoReboot
-
-# Note: The script may stop here if a reboot occurs. That is expected behavior.
 
 
 #--------------------------------------------------------------------------------
@@ -79,8 +101,6 @@ Install-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -AutoReboot
 
 Write-Host ""
 Write-Host "Updating Microsoft Store and other apps via winget..." -ForegroundColor Cyan
-# Since you're on Windows 11, winget is the standard tool for this.
-# This command finds and installs all available updates for installed packages.
 winget upgrade --all --silent --accept-source-agreements --accept-package-agreements
 
 
@@ -90,15 +110,9 @@ winget upgrade --all --silent --accept-source-agreements --accept-package-agreem
 
 Write-Host ""
 Write-Host "Running Disk Cleanup..." -ForegroundColor Cyan
-Write-Host "Note: If this is your first time, you must configure Disk Cleanup options first."
-Write-Host "The tool will be launched for you. Check the boxes you want to clean."
-
-# The /SAGERUN command uses a saved configuration. If it doesn't exist, you must create it with /SAGESET.
-# We will check if the config exists. If not, we prompt the user to create it.
 $regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VolumeCaches"
 if (!(Get-ItemProperty -Path $regPath -Name "StateFlags0001" -ErrorAction SilentlyContinue)) {
     Write-Warning "No Disk Cleanup profile found. Please create one now."
-    Write-Host "Run the following command in a new Admin Terminal: cleanmgr.exe /sageset:1"
     Start-Process "cleanmgr.exe" -ArgumentList "/sageset:1" -Wait
 } else {
     Start-Process "cleanmgr.exe" -ArgumentList "/sagerun:1"
@@ -110,8 +124,9 @@ if (!(Get-ItemProperty -Path $regPath -Name "StateFlags0001" -ErrorAction Silent
 #--------------------------------------------------------------------------------
 
 Write-Host ""
-Write-Host "Script process complete." -ForegroundColor Green
+Write-Host "Script process complete. Press Enter to exit." -ForegroundColor Green
 Write-Host "A detailed log has been saved to: $logPath"
+Read-Host
 
 # End logging
 Stop-Transcript
