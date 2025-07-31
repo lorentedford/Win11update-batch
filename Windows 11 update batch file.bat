@@ -5,8 +5,8 @@
 #
 # It will:
 # 1. Request Admin rights (UAC Prompt).
-# 2. Check and repair the Windows system image (DISM & SFC).
-# 3. Start a log file in C:\updatelogs\.
+# 2. Archive the previous log and create a new, timestamped log.
+# 3. Check and repair the Windows system image (DISM & SFC).
 # 4. Install/Import the PSWindowsUpdate module.
 # 5. Search for, download, and install all available Windows Updates.
 # 6. Update all Microsoft Store / winget apps.
@@ -39,9 +39,38 @@ if (-not (Test-Path -Path $logDirectory)) {
     Write-Host "Creating log directory at $logDirectory..."
     New-Item -Path $logDirectory -ItemType Directory -Force | Out-Null
 }
-$logPath = Join-Path -Path $logDirectory -ChildPath "WindowsUpdateLog.txt"
 
-# Start logging
+# --- Log Archiving Logic ---
+Write-Host "Checking for old logs to archive..."
+$oldCurrentLog = Get-ChildItem -Path $logDirectory -Filter "*current*.txt" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+if ($oldCurrentLog) {
+    Write-Host "Found previous log to archive: $($oldCurrentLog.Name)"
+    
+    # 1. Rename the old log to remove 'current'
+    $renamedLogName = $oldCurrentLog.Name -replace "_current", ""
+    $renamedLogPath = Join-Path -Path $logDirectory -ChildPath $renamedLogName
+    Rename-Item -Path $oldCurrentLog.FullName -NewName $renamedLogName
+    
+    # 2. Zip the renamed log file
+    $zipPath = $renamedLogPath -replace '\.txt$', '.zip'
+    Compress-Archive -Path $renamedLogPath -DestinationPath $zipPath -Force
+    Write-Host "Archived to: $zipPath" -ForegroundColor Green
+    
+    # 3. Remove the old .txt file after zipping
+    Remove-Item -Path $renamedLogPath
+} else {
+    Write-Host "No previous logs found to archive."
+}
+# --- End of Archiving Logic ---
+
+# Define the name for the new log file with a timestamp
+$timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+$logName = "Log_current_$timestamp.txt"
+$logPath = Join-Path -Path $logDirectory -ChildPath $logName
+
+# Start logging to the new timestamped file
+Write-Host "Starting new log at: $logPath"
 Start-Transcript -Path $logPath -Append
 
 
