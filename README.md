@@ -9,7 +9,7 @@ This PowerShell script automates the update process for Windows 11. It installs 
 - Installs all available Windows updates using PowerShell and UsoClient
 - Updates Microsoft Store apps for all users
 - Performs system health checks with DISM and SFC
-- Logs all actions to `windowsupdatelog.txt` on your desktop
+- Logs all actions to `C:\updatelogs` `WindowsUpdateLog.txt` on your desktop
 - Designed to run silently and efficiently
 
 ---
